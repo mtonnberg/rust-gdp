@@ -25,3 +25,10 @@ pub fn lexical(x: u64) -> u64 {
     rust_gdp::name!(value = x);
     value.into_inner()
 }
+#[no_mangle]
+pub fn branded<'n>(
+    x: rust_gdp::Named<'n, u64>,
+    _: rust_gdp::Proof<rust_gdp::And<rust_gdp::Positive<'n>, rust_gdp::Even<'n>>>,
+) -> u64 {
+    x.into_inner()
+}

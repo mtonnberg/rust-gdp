@@ -1,30 +1,30 @@
 //! Ghosts of Departed Proofs for Rust: check once, carry evidence in types.
 //!
 //! ```
-//! use rust_gdp::{with_name, Proof, Holds, Named};
-//! use rust_gdp::predicates::NonEmpty;
-//! fn accept<'n>(s: &Named<'n, &str>, _: Proof<Holds<'n, NonEmpty>>) -> usize {
+//! use rust_gdp::{with_name, Proof, Named};
+//! use rust_gdp::NonEmpty;
+//! fn accept<'n>(s: &Named<'n, &str>, _: Proof<NonEmpty<'n>>) -> usize {
 //!     s.get().len()
 //! }
 //! with_name("hello", |s| {
-//!     let proof = s.check::<NonEmpty>().unwrap();
+//!     let proof = s.check::<NonEmpty<'_>>().unwrap();
 //!     assert_eq!(accept(&s, proof), 5);
 //! });
 //! ```
 //! Proof constructors are private; each invocation introduces a fresh invariant name.
 //!
 //! ```compile_fail
-//! use rust_gdp::{with_name, Proof, Holds};
-//! use rust_gdp::predicates::NonEmpty;
+//! use rust_gdp::{with_name, Proof};
+//! use rust_gdp::NonEmpty;
 //! with_name("yes", |a| with_name("", |b| {
-//!     let p = a.check::<NonEmpty>().unwrap();
+//!     let p = a.check::<NonEmpty<'_>>().unwrap();
 //!     b.refine(p); // evidence belongs to a, not b
 //! }));
 //! ```
 //! ```compile_fail
 //! use rust_gdp::with_name;
-//! use rust_gdp::predicates::NonEmpty;
-//! let escaped = with_name("yes", |x| x.check::<NonEmpty>().unwrap());
+//! use rust_gdp::NonEmpty;
+//! let escaped = with_name("yes", |x| x.check::<NonEmpty<'_>>().unwrap());
 //! ```
 //! ```compile_fail
 //! use rust_gdp::Proof;
@@ -43,6 +43,8 @@ extern crate alloc;
 
 use core::marker::PhantomData;
 pub mod collections;
+pub mod facts;
+pub use facts::*;
 pub mod predicates;
 pub mod relations;
 pub mod transform;
@@ -71,8 +73,22 @@ impl<P> Proof<P> {
     }
 }
 
-/// Proposition: predicate `P` held when checked for the immutable value named `'n`.
-pub struct Holds<'n, P>(Brand<'n>, PhantomData<fn() -> P>);
+/// A proposition about exactly the value branded by `'n`.
+///
+/// The associated specification decides this fact. Custom implementations define
+/// trusted domain facts; implementations for built-in fact types are owned by
+/// this crate, preventing downstream code from retargeting their brands.
+pub trait Fact<'n> {
+    /// The unbranded specification that validates this proposition.
+    type Predicate;
+}
+
+/// Connect a persistent specification to its branded proposition family.
+/// The equality bound prevents a custom family from manufacturing built-in facts.
+pub trait PredicateFamily {
+    /// This specification instantiated at the supplied fresh brand.
+    type Fact<'n>: Fact<'n, Predicate = Self>;
+}
 /// Constructive conjunction.
 pub struct And<A, B>(PhantomData<fn() -> (A, B)>);
 /// Constructive disjunction. Its erased evidence does not retain which branch held.
@@ -150,9 +166,9 @@ pub fn with_name<T, R>(value: T, f: impl for<'n> FnOnce(Named<'n, T>) -> R) -> R
 /// Name a value in the current lexical scope with a fresh hidden brand.
 ///
 /// ```
-/// use rust_gdp::{name, predicates::NonEmpty};
+/// use rust_gdp::{name, NonEmpty};
 /// name!(message = "hello");
-/// let proof = message.check::<NonEmpty>().unwrap();
+/// let proof = message.check::<NonEmpty<'_>>().unwrap();
 /// assert_eq!(message.refine(proof).into_inner(), "hello");
 /// ```
 ///
@@ -161,10 +177,10 @@ pub fn with_name<T, R>(value: T, f: impl for<'n> FnOnce(Named<'n, T>) -> R) -> R
 /// safe code. Names and proofs are bounded by the enclosing lexical scope.
 ///
 /// ```compile_fail
-/// use rust_gdp::{name, predicates::NonEmpty};
+/// use rust_gdp::{name, NonEmpty};
 /// name!(a = "hello");
 /// name!(b = "");
-/// b.refine(a.check::<NonEmpty>().unwrap());
+/// b.refine(a.check::<NonEmpty<'_>>().unwrap());
 /// ```
 ///
 /// ```compile_fail
@@ -207,12 +223,15 @@ impl<'n, T> Named<'n, T> {
     }
     /// Run a predicate once and obtain evidence on success.
     #[inline]
-    pub fn check<P: Predicate<T>>(&self) -> Option<Proof<Holds<'n, P>>> {
-        P::test(&self.value).then(Proof::new)
+    pub fn check<F: Fact<'n>>(&self) -> Option<Proof<F>>
+    where
+        F::Predicate: Predicate<T>,
+    {
+        F::Predicate::test(&self.value).then(Proof::new)
     }
     /// Attach established evidence to the owned value without rechecking.
     #[inline(always)]
-    pub fn refine<P>(self, _: Proof<Holds<'n, P>>) -> Refined<T, P> {
+    pub fn refine<F: Fact<'n>>(self, _: Proof<F>) -> Refined<T, F::Predicate> {
         Refined {
             value: self.value,
             predicate: PhantomData,
@@ -273,7 +292,10 @@ impl<T, P> Refined<T, P> {
     }
     /// Name this value and recover scoped evidence, without rechecking.
     #[inline(always)]
-    pub fn with_name<R>(self, f: impl for<'n> FnOnce(Named<'n, T>, Proof<Holds<'n, P>>) -> R) -> R {
+    pub fn with_name<R>(self, f: impl for<'n> FnOnce(Named<'n, T>, Proof<P::Fact<'n>>) -> R) -> R
+    where
+        P: PredicateFamily,
+    {
         with_name(self.value, |n| f(n, Proof::new()))
     }
 }
@@ -320,27 +342,14 @@ impl<A, B> Proof<Or<A, B>> {
         Proof::new()
     }
 }
-impl<'n, P> Proof<Holds<'n, P>> {
-    /// Combine two checks on the same named value into a predicate conjunction.
-    #[inline(always)]
-    pub const fn both<Q>(self, _: Proof<Holds<'n, Q>>) -> Proof<Holds<'n, predicates::All<P, Q>>> {
-        Proof::new()
-    }
-}
-impl<'n, P, Q> Proof<Holds<'n, predicates::All<P, Q>>> {
-    /// Recover both constituent predicate proofs.
-    #[inline(always)]
-    pub const fn components(self) -> (Proof<Holds<'n, P>>, Proof<Holds<'n, Q>>) {
-        (Proof::new(), Proof::new())
-    }
-}
 impl<'n, T> Named<'n, T> {
     /// Decide a predicate, retaining positive or negative evidence in the branch.
     #[inline]
-    pub fn decide<P: Predicate<T>>(
-        &self,
-    ) -> Result<Proof<Holds<'n, P>>, Proof<Holds<'n, predicates::Not<P>>>> {
-        if P::test(&self.value) {
+    pub fn decide<F: Fact<'n>>(&self) -> Result<Proof<F>, Proof<facts::Not<F>>>
+    where
+        F::Predicate: Predicate<T>,
+    {
+        if F::Predicate::test(&self.value) {
             Ok(Proof::new())
         } else {
             Err(Proof::new())

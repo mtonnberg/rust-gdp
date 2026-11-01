@@ -1,5 +1,8 @@
 use core::mem::{align_of, size_of};
-use rust_gdp::{predicates::*, relations::*, uint::*, *};
+use rust_gdp::{
+    and_left, and_right, identity, predicates::*, relations::*, truth, uint::*, with_name, And,
+    CheckedRef, Named, Predicate, Proof, Refined, True,
+};
 
 fn test<P: Predicate<T>, T: ?Sized>(v: &T) -> bool {
     P::test(v)
@@ -8,7 +11,7 @@ fn test<P: Predicate<T>, T: ?Sized>(v: &T) -> bool {
 #[test]
 fn representations_are_erased() {
     assert_eq!(size_of::<Proof<And<True, True>>>(), 0);
-    assert_eq!(size_of::<Proof<Holds<'static, NonEmpty>>>(), 0);
+    assert_eq!(size_of::<Proof<rust_gdp::NonEmpty<'static>>>(), 0);
     assert_eq!(size_of::<Proof<Related<'static, 'static, Less>>>(), 0);
     assert_eq!(size_of::<Refined<u64, Positive>>(), size_of::<u64>());
     assert_eq!(align_of::<Refined<u64, Positive>>(), align_of::<u64>());
@@ -18,8 +21,8 @@ fn representations_are_erased() {
 #[test]
 fn scoped_proofs_and_logic() {
     with_name("abc", |s| {
-        let p = s.check::<NonEmpty>().unwrap();
-        let q = s.check::<Ascii>().unwrap();
+        let p = s.check::<rust_gdp::NonEmpty<'_>>().unwrap();
+        let q = s.check::<rust_gdp::Ascii<'_>>().unwrap();
         let pair = p.and(q);
         let (p, _) = pair.split();
         let p = identity().apply(p);
@@ -27,20 +30,20 @@ fn scoped_proofs_and_logic() {
         let _ = and_right().apply(pair);
         let _ = and_left().then(identity()).apply(pair);
         let _ = p
-            .or_left::<Holds<'_, NonEmpty>>()
+            .or_left::<rust_gdp::NonEmpty<'_>>()
             .cases(identity(), identity());
-        let both = p.both(q);
-        let (_, _) = both.components();
+        let both = p.and(q);
+        let (_, _) = both.split();
         let refined = s.refine(both);
         assert_eq!(*refined.get(), "abc");
         refined.with_name(|s, p| {
-            let (_, _) = p.components();
+            let (_, _) = p.split();
             assert_eq!(*s.get(), "abc");
         });
     });
     with_name("", |s| {
-        assert!(s.check::<NonEmpty>().is_none());
-        let negative = s.decide::<NonEmpty>().unwrap_err();
+        assert!(s.check::<rust_gdp::NonEmpty<'_>>().is_none());
+        let negative = s.decide::<rust_gdp::NonEmpty<'_>>().unwrap_err();
         assert_eq!(*s.refine(negative).get(), "");
     });
     let _ = truth().and(truth()).split();
@@ -56,6 +59,13 @@ fn refinements_check_only_at_boundary() {
             CALLS.fetch_add(1, Ordering::SeqCst);
             *v > 0
         }
+    }
+    struct CountFact<'n>(core::marker::PhantomData<fn(&'n ()) -> &'n ()>);
+    impl<'n> rust_gdp::Fact<'n> for CountFact<'n> {
+        type Predicate = Count;
+    }
+    impl rust_gdp::PredicateFamily for Count {
+        type Fact<'n> = CountFact<'n>;
     }
     let r = Refined::<_, Count>::new(3).unwrap();
     assert_eq!(CALLS.load(Ordering::SeqCst), 1);
@@ -269,7 +279,7 @@ fn successful_transformation_and_decision() {
     let q = p.try_map::<_, Even>(|n| n + 1).unwrap();
     assert_eq!(q.into_inner(), 2);
     with_name(1, |n| {
-        let p = n.decide::<Positive>().unwrap();
+        let p = n.decide::<rust_gdp::Positive<'_>>().unwrap();
         assert_eq!(n.refine(p).into_inner(), 1);
     });
     let max = U13::new(U13::MAX).unwrap();
@@ -298,7 +308,7 @@ fn lexical_names_and_hygiene() {
     assert_eq!(evaluations.get(), 1);
     rust_gdp::name!(let other = 4u32);
     let _ = value.relate::<_, Less>(&other).unwrap();
-    let p = value.check::<Positive>().unwrap();
+    let p = value.check::<rust_gdp::Positive<'_>>().unwrap();
     assert_eq!(value.refine(p).into_inner(), 3);
     assert_eq!(__rust_gdp_guard, 7);
     for i in 0..3 {
@@ -307,8 +317,26 @@ fn lexical_names_and_hygiene() {
     }
     let escaped = {
         rust_gdp::name!(value = 2u32);
-        let p = value.check::<Positive>().unwrap();
+        let p = value.check::<rust_gdp::Positive<'_>>().unwrap();
         value.refine(p)
     };
     assert_eq!(escaped.into_inner(), 2);
+}
+
+#[test]
+fn branded_conjunction_contract() {
+    fn accept<'n>(
+        n: &Named<'n, &str>,
+        _: Proof<And<rust_gdp::NonEmpty<'n>, rust_gdp::Ascii<'n>>>,
+    ) -> usize {
+        n.get().len()
+    }
+    rust_gdp::name!(n = "hello");
+    let p = n
+        .check::<And<rust_gdp::NonEmpty<'_>, rust_gdp::Ascii<'_>>>()
+        .unwrap();
+    assert_eq!(accept(&n, p), 5);
+    let (nonempty, ascii) = p.split();
+    let valid = n.refine(nonempty.and(ascii));
+    valid.with_name(|n, p| assert_eq!(accept(&n, p), 5));
 }

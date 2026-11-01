@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replace `Holds` with direct branded facts such as `NonEmpty<'n>` and
+  `Proof<And<NonEmpty<'n>, Ascii<'n>>>`. Use `and`/`split` for composition.
+  Persistent refinements retain the specifications in `predicates`.
+- Add `Fact` and `PredicateFamily` with exact specification matching for safe
+  restoration of branded evidence and custom domain extensions.
+
 - Add `name!` for fresh lexical names, backed by generativity 1.2.1, with linear
   guard interoperation and additional isolation/divergence regression tests.
 - Make root `ci.sh` the shared local/CI/Nix build gate, including security,

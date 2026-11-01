@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix="rust-gdp-codegen-") as out:
 
     baseline = body("baseline")
     assert len(baseline) == 1 and baseline[0].startswith("ret i64 "), baseline
-    for name in ["scoped", "refined", "logical", "evidence_roundtrip", "lexical"]:
+    for name in ["scoped", "refined", "logical", "evidence_roundtrip", "lexical", "branded"]:
         actual = body(name)
         assert actual == baseline, f"{name}: {actual} != {baseline}"
         print(f"{name}: identical optimized IR to baseline")

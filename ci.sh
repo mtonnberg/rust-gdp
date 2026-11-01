@@ -43,5 +43,6 @@ RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo doc --no-deps --all-features 
 python3 scripts/test_gate.py
 python3 scripts/codegen.py
 cargo run --example validated_config --locked --offline
+cargo run --example branded_name --locked --offline
 cargo package --allow-dirty --locked --offline
 python3 scripts/test_package.py

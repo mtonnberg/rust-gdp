@@ -33,10 +33,10 @@ feature (enabled by default). Disable default features for core-only environment
 For a named local variable without nesting your code inside callbacks:
 
 ```rust
-use rust_gdp::{name, predicates::NonEmpty};
+use rust_gdp::{name, NonEmpty};
 
 name!(message = "hello");
-let proof = message.check::<NonEmpty>().unwrap();
+let proof = message.check::<NonEmpty<'_>>().unwrap();
 let checked = message.refine(proof);
 assert_eq!(checked.into_inner(), "hello");
 ```
@@ -61,15 +61,16 @@ invariant lifetime brand, so a proof about one value cannot satisfy a requiremen
 about another, even when both values have the same Rust type.
 
 ```rust
-use rust_gdp::{with_name, Named, Holds, Proof, predicates::NonEmpty};
+use rust_gdp::{with_name, Named, NonEmpty, Ascii, And, Proof};
 
-fn send<'n>(message: &Named<'n, &str>, _: Proof<Holds<'n, NonEmpty>>) {
+fn send<'n>(message: &Named<'n, &str>, _: Proof<And<NonEmpty<'n>, Ascii<'n>>>) {
     println!("{}", message.get());
 }
 
 with_name("hello", |message| {
-    let nonempty = message.check::<NonEmpty>().unwrap();
-    send(&message, nonempty);
+    let nonempty = message.check::<NonEmpty<'_>>().unwrap();
+    let ascii = message.check::<Ascii<'_>>().unwrap();
+    send(&message, nonempty.and(ascii));
     // Attach existing evidence to the value; no second predicate evaluation.
     let persistent = message.refine(nonempty);
     assert_eq!(persistent.into_inner(), "hello");
@@ -90,8 +91,8 @@ both brands and their order.
 `Proof` supports conjunction introduction/elimination, disjunction introduction,
 implication identity/projections/composition/application, and disjunction
 elimination using proofs that both alternatives imply the same conclusion. These
-are erased structural rules, not runtime closures. `both` and `components`
-connect same-value predicate conjunctions to separate checks. An erased
+are erased structural rules, not runtime closures. `and` and `split` compose and decompose direct branded facts. A conjunction
+checked against one name can be attached to that value without rechecking. An erased
 `Proof<Or<A,B>>` does not reveal a branch; use a runtime `Result` when you need to
 choose runtime behavior. There is no public axiom/assume/proof-forging API.
 
@@ -121,8 +122,8 @@ construction, without adding a validation scan after the transformation.
 | --- | --- |
 | `fact` and trusted `check` | Marker type implementing `Predicate<T>` or `Relation<A,B>` |
 | Attached unary fact | `Refined<T,P>` |
-| Detached fact with subject identity | `Proof<Holds<'n,P>>` plus `Named<'n,T>` |
-| Fact composition and decomposition | `both`, `components`, `and`, `split` |
+| Detached fact with subject identity | `Proof<NonEmpty<'n>>` (or another branded fact) plus `Named<'n,T>` |
+| Fact composition and decomposition | `and`, `split` |
 | Multi-subject facts | `Relation` and `Proof<Related<'a,'b,R>>` |
 | `ForAll P` and element propagation | `Each<P>`, checked iterators and mapping |
 | Existential witness transport | `Refined` and `RelatedPair::with_names` |
@@ -137,6 +138,28 @@ ordinary marker generics and const generics. Higher-arity checks can name an own
 tuple and use a custom `Predicate` on that tuple; there is no automatic n-ary
 subject unification or arbitrary theorem synthesis. These are deliberate Rust
 library boundaries rather than claims of full language equivalence.
+
+## Branded facts and persistent specifications
+
+Signatures use direct branded facts, for example
+`Proof<And<NonEmpty<'n>, Ascii<'n>>>`. These are concrete invariant types,
+exported at the crate root and in `facts`; there is no `Holds` wrapper.
+`Named::check::<NonEmpty<'_>>()` binds the check to that name. Use `.and()`
+and `.split()` for evidence composition, or check the `And` proposition directly.
+
+Persistent `Refined<T,P>` values use the unbranded specifications in `predicates`,
+for example `Refined<String, predicates::NonEmpty>`. The `Fact<'n>` trait maps
+branded facts to those specifications. `PredicateFamily` maps a specification
+back to its branded family when `Refined::with_name` restores evidence. Its
+associated-type equality requires that the family really belongs to the same
+specification; a custom specification cannot mint built-in facts.
+
+For a custom fact, define an invariant branded marker, implement `Fact<'n>` for
+that marker at the matching lifetime, and associate your `Predicate<T>` marker.
+Implement `PredicateFamily` for the specification if it needs to restore named
+evidence from refinements. Custom fact meanings and correct lifetime indexing
+are trusted domain definitions, just as custom predicate implementations are.
+Builtin fact indexing is fixed by this crate and cannot be overridden downstream.
 
 ## Standard predicates
 
@@ -200,8 +223,9 @@ operators deliberately require explicit checked arithmetic. Rust has no primitiv
   custom specifications and the code consuming raw `.get()` values. Types make
   validated preconditions visible; they do not verify a function's body.
 
-To add a domain fact, implement `Predicate<T>` for a marker type, then use it in
-`Refined` or `Named::check`. To transform a refinement, consume it with `try_map`:
+To add a domain specification, implement `Predicate<T>` for a marker type and
+use it in `Refined`. For named contracts, also define its branded `Fact` as
+explained above. To transform a refinement, consume it with `try_map`:
 old evidence is discarded and the new predicate is checked. A failing constructor
 or transformation returns the rejected value unchanged.
 
