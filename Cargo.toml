@@ -1,0 +1,22 @@
+[package]
+name = "rust-gdp"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Generative, zero-sized proofs and refinement types for Rust"
+license = "Apache-2.0"
+repository = "https://github.com/mtonnberg/rust-gdp"
+readme = "README.md"
+keywords = ["proof", "refinement", "typestate", "verification", "no-std"]
+categories = ["rust-patterns", "no-std"]
+include = ["src/**", "examples/**", "tests/**", "README.md", "LICENSE", "CHANGELOG.md", "Cargo.lock"]
+
+[features]
+default = ["alloc"]
+alloc = []
+
+[dependencies]
+
+[[example]]
+name = "validated_config"
+required-features = ["alloc"]

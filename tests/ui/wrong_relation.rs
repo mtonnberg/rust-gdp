@@ -1,0 +1,1 @@
+use rust_gdp::{with_name,Proof,Named,relations::*}; fn need<'a,'b>(_: &Named<'a,i32>,_: &Named<'b,i32>,_:Proof<Related<'a,'b,Less>>) {} fn main() { with_name(1, |a| with_name(2, |b| { let p=a.relate::<_,Less>(&b).unwrap(); need(&b,&a,p); })); }
