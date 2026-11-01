@@ -2,30 +2,38 @@
   description = "rust-gdp: checked evidence with erased proof plumbing";
   inputs.nixpkgs.url = "https://github.com/NixOS/nixpkgs/archive/fa1373130d5a21c040a47c5dbe1913d59ed91808.tar.gz";
 
-  outputs = { self, nixpkgs }:
+  inputs.rustsec = {
+    url = "git+https://github.com/RustSec/advisory-db?ref=main&shallow=1";
+    flake = false;
+  };
+
+  outputs = { self, nixpkgs, rustsec }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       eachSystem = nixpkgs.lib.genAttrs systems;
       forSystem = system:
         let
           pkgs = import nixpkgs { inherit system; };
-          tools = with pkgs; [ rustc cargo clippy rustfmt python3 ];
+          tools = with pkgs; [ rustc cargo clippy rustfmt python3 ruff shellcheck actionlint cargo-audit cargo-deny git ];
           crate = pkgs.rustPlatform.buildRustPackage {
             pname = "rust-gdp";
             version = "0.1.0";
             src = pkgs.lib.cleanSourceWith {
               src = self;
               filter = path: type:
-                !(builtins.elem (baseNameOf path) [ ".git" "target" "result" ])
+                !(builtins.elem (baseNameOf path) [ ".git" "target" "result" "__pycache__" ".ruff_cache" ])
                 && pkgs.lib.cleanSourceFilter path type;
             };
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = tools;
             doCheck = true;
+            RUST_GDP_NIX_SHELL = "1";
+            RUSTSEC_ADVISORY_DB = rustsec;
+            RUSTSEC_ADVISORY_DB_TIMESTAMP = toString rustsec.lastModified;
             checkPhase = ''
               runHook preCheck
               export RUSTDOCFLAGS="-D warnings"
-              bash scripts/verify.sh
+              bash ci.sh --offline
               runHook postCheck
             '';
             installPhase = ''
@@ -43,7 +51,12 @@
         in {
           packages.default = crate;
           checks.default = crate;
-          devShells.default = pkgs.mkShell { packages = tools; };
+          devShells.default = pkgs.mkShell {
+            packages = tools;
+            RUST_GDP_NIX_SHELL = "1";
+            RUSTSEC_ADVISORY_DB = rustsec;
+            RUSTSEC_ADVISORY_DB_TIMESTAMP = toString rustsec.lastModified;
+          };
         };
     in {
       packages = eachSystem (system: (forSystem system).packages);

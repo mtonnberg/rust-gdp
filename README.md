@@ -23,11 +23,38 @@ start(name, retries);
 ```
 
 Use `rust-gdp = "0.1"` after publication, or a local path dependency before then.
-The Rust import is `rust_gdp`. There are **no Cargo dependencies**, including dev
-dependencies. The crate supports Rust 1.85+, `no_std`, and an optional `alloc`
+The Rust import is `rust_gdp`. Its sole library dependency is the pinned,
+`no_std` `generativity` crate (1.2.1), used for lexical naming. There are no
+dev dependencies. The crate supports Rust 1.85+, `no_std`, and an optional `alloc`
 feature (enabled by default). Disable default features for core-only environments.
 
 ## Fresh names and departed proofs
+
+For a named local variable without nesting your code inside callbacks:
+
+```rust
+use rust_gdp::{name, predicates::NonEmpty};
+
+name!(message = "hello");
+let proof = message.check::<NonEmpty>().unwrap();
+let checked = message.refine(proof);
+assert_eq!(checked.into_inner(), "hello");
+```
+
+`name!(let message = expression)` is also supported. The expression runs once.
+The macro creates a hidden, fresh **invariant lifetime parameter**, giving the
+variable type `Named<'unique,T>`. The caller cannot choose or reproduce that brand
+in safe code. This provides GDP-style identity in Rust; it uses a lifetime generic
+rather than a freshly generated nominal type. Another `name!` cannot use this
+value's evidence, including under shadowing, in repeated loop iterations, or in
+diverging code. A local marker struct alone would not provide this guarantee,
+because one macro expansion or function can be evaluated repeatedly with the same
+nominal type.
+
+Hidden lexical guards bound the name to its enclosing scope. You can return a
+refinement that consumes the name, but cannot return the name or its detached
+proof beyond that scope. `Named::from_guard` supports integration with an existing
+`generativity::Guard`, consuming it exactly once; a copyable `Id` is insufficient.
 
 `Refined<T, P>` is a persistent checked value. `with_name` introduces a fresh
 invariant lifetime brand, so a proof about one value cannot satisfy a requirement
@@ -149,11 +176,16 @@ operators deliberately require explicit checked arithmetic. Rust has no primitiv
 * Establishing a new fact performs the predicate/relation check. Unknown input
   cannot acquire truthful evidence for free. Checks that scan strings/collections
   cost the corresponding scan; a `Result`/`Option` branch carries runtime state.
-* The library never allocates on its own. `String`/`Vec` retain their own costs.
-  Optimized code-generation tests compare representative proof paths to a raw
-  identity function. Debug builds need not inline away every function call.
-* The entire library forbids unsafe code. Proofs never authorize unchecked memory
-  operations. Downstream code must not use a custom predicate as an unsafe-code
+* Proof handling never allocates. Collection transformations retain their usual
+  vector and sorting allocation costs. Optimized code-generation tests compare
+  representative proof paths to a raw identity function. Debug builds need not
+  inline away every function call.
+* The library's own code forbids unsafe code. The lexical `name!` macro relies on
+  the small unsafe implementation inside `generativity`; its freshness depends on
+  invariant lifetimes, lexical drop order, and its divergence protection. This is
+  an explicit trusted dependency. Consumers can still use `#![forbid(unsafe_code)]`.
+  Proofs never authorize unchecked memory operations. Downstream code must not
+  use a custom predicate as an unsafe-code
   precondition without separately auditing its assumptions.
 * Custom `Predicate` and `Relation` implementations are trusted specifications.
   They must be pure, stable, and express the property their names promise.
@@ -178,23 +210,42 @@ or transformation returns the rejected value unchanged.
 With a flake-capable Nix installation:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop
-bash scripts/verify.sh
+./ci.sh
 # Or build the checked, publishable .crate artifact directly:
 nix --extra-experimental-features 'nix-command flakes' build
 # result/share/rust-gdp/rust-gdp-0.1.0.crate
 ```
 
 `flake.lock` pins the entire development toolchain and host dependencies. Nix
-provides Cargo, rustc, rustfmt, Clippy, and Python for code-generation checks;
+provides the Rust toolchain, security scanners, shell/workflow linters, and Python/Ruff;
 Cargo manages Rust packages. No rustup, Python, or C compiler preinstallation is
 required. Supported flake systems: Linux and macOS on x86-64 and AArch64.
 
-The verification script runs formatting, warning-free Clippy, debug/release tests,
-core-only tests, doctests, rustdoc, compile-fail consumer fixtures (checking their
-intended diagnostics), LLVM proof-erasure checks, and `cargo package` including
-rebuilding the packaged source. Tests exhaust all `u13` and `i16` values, numeric
-edges/NaNs, UTF-8, predicate composition, branding invariance, proof isolation,
+The root `ci.sh` is the single required gate. Run `./ci.sh` locally before pushing;
+it enters the pinned Nix shell automatically, so Nix is the only prerequisite.
+`scripts/verify.sh` forwards to this same gate. Every CI push, pull request, and
+manual build runs it on Linux and macOS; `nix build` also invokes it during the
+check phase.
+
+The gate checks current RustSec advisories with `cargo audit --deny warnings`,
+then checks allowed licenses (MIT/Apache-2.0), duplicate versions, wildcard
+requirements, and dependency sources with `cargo deny`. It runs ShellCheck,
+actionlint, Ruff lint/format checks, rustfmt (including code-generation fixtures),
+Clippy for both feature configurations with warnings denied, default/core-only/
+release tests, doctests, rustdoc with warnings denied, compile-fail consumers,
+LLVM proof-erasure checks, the runnable example, packaging, and tests against the
+extracted package. Tests also check that gate stages fail closed when a tool,
+security scan, lint, test, or package check fails. There is no skip-security mode.
+Third-party CI actions are pinned to commit hashes.
+
+`./ci.sh --offline` uses the content-pinned RustSec snapshot from `flake.lock`
+without network access once the Nix inputs and dependencies are available. Nix's
+sandboxed build uses this mode. Missing databases, missing timestamps, and
+snapshots older than 30 days fail the gate. Refresh the snapshot with
+`nix flake update rustsec`; the normal online gate fetches the current advisory
+database on every run. Security tools and their host dependencies come from Nix.
+
+Tests exhaust all `u13` and `i16` values, numeric edges/NaNs, UTF-8, predicate composition, branding invariance, proof isolation,
 escape prevention, mutation restrictions, and preservation of ownership on errors.
 
 For publication, run `nix develop -c cargo publish --dry-run --allow-dirty` and

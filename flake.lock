@@ -14,7 +14,26 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "rustsec": "rustsec"
+      }
+    },
+    "rustsec": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793358759,
+        "narHash": "sha256-hxKuHEEXkeXPb6jP2EZu1Bl/Q4d4wihs/PYBN/b2Ntw=",
+        "ref": "main",
+        "rev": "2295466c4e9df26647fd67d8fa1c705ac2fc7f81",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/RustSec/advisory-db"
+      },
+      "original": {
+        "ref": "main",
+        "shallow": true,
+        "type": "git",
+        "url": "https://github.com/RustSec/advisory-db"
       }
     }
   },

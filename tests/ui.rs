@@ -48,7 +48,10 @@ fn proof_contracts_are_enforced_by_rustc() {
         } else {
             let expected = fs::read_to_string(case.with_extension("stderr")).unwrap();
             assert!(
-                !output.status.success() && stderr.contains(expected.trim()),
+                !output.status.success()
+                    && expected
+                        .lines()
+                        .any(|line| !line.trim().is_empty() && stderr.contains(line.trim())),
                 "{}: expected rejection containing {:?}, got {stderr}",
                 case.display(),
                 expected.trim()

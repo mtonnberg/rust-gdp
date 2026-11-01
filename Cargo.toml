@@ -16,6 +16,7 @@ default = ["alloc"]
 alloc = []
 
 [dependencies]
+generativity = "=1.2.1"
 
 [[example]]
 name = "validated_config"

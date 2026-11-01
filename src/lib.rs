@@ -147,7 +147,59 @@ pub fn with_name<T, R>(value: T, f: impl for<'n> FnOnce(Named<'n, T>) -> R) -> R
         brand: PhantomData,
     })
 }
+/// Name a value in the current lexical scope with a fresh hidden brand.
+///
+/// ```
+/// use rust_gdp::{name, predicates::NonEmpty};
+/// name!(message = "hello");
+/// let proof = message.check::<NonEmpty>().unwrap();
+/// assert_eq!(message.refine(proof).into_inner(), "hello");
+/// ```
+///
+/// The hidden generic parameter is an invariant lifetime, generated once per
+/// evaluation (including loop iterations). It cannot be chosen or reproduced in
+/// safe code. Names and proofs are bounded by the enclosing lexical scope.
+///
+/// ```compile_fail
+/// use rust_gdp::{name, predicates::NonEmpty};
+/// name!(a = "hello");
+/// name!(b = "");
+/// b.refine(a.check::<NonEmpty>().unwrap());
+/// ```
+///
+/// ```compile_fail
+/// use rust_gdp::name;
+/// let escaped = { name!(value = 1); value };
+/// ```
+#[macro_export]
+macro_rules! name {
+    ($name:ident = $value:expr $(;)?) => {
+        let __rust_gdp_value = $value;
+        $crate::__generativity::make_guard!(__rust_gdp_guard);
+        let $name = $crate::Named::from_guard(__rust_gdp_value, __rust_gdp_guard);
+    };
+    (let $name:ident = $value:expr $(;)?) => {
+        $crate::name!($name = $value);
+    };
+}
+
+// Re-export for hygienic expansion, including when the dependency is renamed.
+#[doc(hidden)]
+pub use generativity as __generativity;
+
 impl<'n, T> Named<'n, T> {
+    /// Bind one value to a unique generativity guard, consuming the guard.
+    ///
+    /// Prefer [`name!`] unless interoperating with a caller's `generativity`
+    /// guard. The guard is linear: an `Id` (which is copyable) is insufficient.
+    #[inline(always)]
+    pub fn from_guard(value: T, _guard: generativity::Guard<'n>) -> Self {
+        Self {
+            value,
+            brand: PhantomData,
+        }
+    }
+
     /// Read the value without changing its identity.
     #[inline(always)]
     pub fn get(&self) -> &T {

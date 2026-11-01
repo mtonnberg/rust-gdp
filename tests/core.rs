@@ -282,3 +282,33 @@ fn successful_transformation_and_decision() {
     assert!(!<NonZero as Predicate<f32>>::test(&f32::NAN));
     assert!(!<Finite as Predicate<f32>>::test(&f32::INFINITY));
 }
+
+#[test]
+fn lexical_names_and_hygiene() {
+    use std::cell::Cell;
+    let evaluations = Cell::new(0);
+    // The macro evaluates the expression once and does not capture caller locals.
+    let __rust_gdp_guard = 7;
+    rust_gdp::name!(
+        value = {
+            evaluations.set(evaluations.get() + 1);
+            3u32
+        }
+    );
+    assert_eq!(evaluations.get(), 1);
+    rust_gdp::name!(let other = 4u32);
+    let _ = value.relate::<_, Less>(&other).unwrap();
+    let p = value.check::<Positive>().unwrap();
+    assert_eq!(value.refine(p).into_inner(), 3);
+    assert_eq!(__rust_gdp_guard, 7);
+    for i in 0..3 {
+        rust_gdp::name!(iteration = i);
+        assert_eq!(iteration.into_inner(), i);
+    }
+    let escaped = {
+        rust_gdp::name!(value = 2u32);
+        let p = value.check::<Positive>().unwrap();
+        value.refine(p)
+    };
+    assert_eq!(escaped.into_inner(), 2);
+}
