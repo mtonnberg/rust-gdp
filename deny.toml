@@ -1,0 +1,18 @@
+# Advisory checks run through cargo-audit in ci.sh so Nix builds can use a
+# content-addressed RustSec snapshot without network access.
+[graph]
+all-features = true
+
+[licenses]
+allow = ["Apache-2.0", "MIT"]
+confidence-threshold = 0.95
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
